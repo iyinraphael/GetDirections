@@ -14,6 +14,29 @@ import AVFoundation
 
 class ViewController: UIViewController {
     
+    var steps: [MKRoute.Step] = []
+    var stepCounter = 0
+    var route: MKRoute?
+    var showMapRoute = false
+    var navigationStarted = false
+    let locationDistance: Double = 500
+    
+    var speechSynthesizer = AVSpeechSynthesizer()
+    
+    lazy var locationManager: CLLocationManager = {
+        let locationManager = CLLocationManager()
+         
+        if CLLocationManager.locationServicesEnabled() {
+            locationManager.delegate = self
+            locationManager.desiredAccuracy = kCLLocationAccuracyBest
+            handleAuthorizationStatus(locationManager: locationManager, status: CLLocationManager.authorizationStatus())
+        } else {
+            print("Location servies are not enabled")
+        }
+        
+        return locationManager
+    }()
+    
     lazy var directionLabel: UILabel = {
         let label = UILabel()
         label.text = "Where do you want to go?"
@@ -50,6 +73,8 @@ class ViewController: UIViewController {
     
     lazy var mapView: MKMapView = {
         let mapView = MKMapView()
+        mapView.delegate = self
+        mapView.showsUserLocation = true
         return mapView
     }()
     
@@ -65,6 +90,7 @@ class ViewController: UIViewController {
         super.viewDidLoad()
         // Do any additional setup after loading the view.
         setupViews()
+        locationManager.startUpdatingLocation()
     }
 
     fileprivate func setupViews() {
@@ -82,10 +108,30 @@ class ViewController: UIViewController {
     }
     
     fileprivate func centerViewToUserLocation(center: CLLocationCoordinate2D) {
-        
+        let region = MKCoordinateRegion(center: center, latitudinalMeters: locationDistance, longitudinalMeters: locationDistance)
+        mapView.setRegion(region, animated: true)
     }
     
     fileprivate func handleAuthorizationStatus(locationManager: CLLocationManager, status: CLAuthorizationStatus) {
+        switch status {
+            
+        case .notDetermined:
+            locationManager.requestWhenInUseAuthorization()
+            break
+        case .restricted:
+            break
+        case .denied:
+            break
+        case .authorizedAlways:
+            break
+        case .authorizedWhenInUse:
+            if let center = locationManager.location?.coordinate {
+                centerViewToUserLocation(center: center)
+            }
+            break
+        @unknown default:
+            fatalError()
+        }
         
     }
     
@@ -96,5 +142,27 @@ class ViewController: UIViewController {
     fileprivate func getRouteSteps(route: MKRoute) {
         
     }
+
+}
+
+
+extension ViewController: CLLocationManagerDelegate {
+    
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        if !showMapRoute {
+            if let location = locations.last {
+                let center = location.coordinate
+                centerViewToUserLocation(center: center)
+            }
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        handleAuthorizationStatus(locationManager: locationManager, status: status)
+    }
+}
+
+
+extension ViewController: MKMapViewDelegate {
 
 }
