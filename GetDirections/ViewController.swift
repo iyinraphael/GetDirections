@@ -79,11 +79,44 @@ class ViewController: UIViewController {
     }()
     
     @objc fileprivate func getDirectionButtonTapped() {
+        guard let text = textField.text else { return }
+        showMapRoute = true
+        textField.endEditing(true)
         
+        let geoCoder = CLGeocoder()
+        geoCoder.geocodeAddressString(text) { placemarks, error in
+            if let error = error {
+                print(error.localizedDescription)
+                return
+            }
+            guard let placemarks = placemarks,
+                let placemark = placemarks.first,
+                let location = placemark.location else { return }
+            let destinationCoordinate = location.coordinate
+            self.mapRoute(destinationCoordinate: destinationCoordinate)
+            
+        }
     }
     
     @objc fileprivate func startStopButtonTapped() {
+        if !navigationStarted {
+            showMapRoute = true
+            if let location = locationManager.location {
+                let center = location.coordinate
+                centerViewToUserLocation(center: center)
+            }
+            
+        } else {
+            if let route = route {
+                self.mapView.setVisibleMapRect(route.polyline.boundingMapRect,
+                                               edgePadding: UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16), animated: true)
+                self.steps.removeAll()
+                self.stepCounter = 0
+            }
+        }
+        navigationStarted.toggle()
         
+        startStopButton.setTitle(navigationStarted ? "Stop Navigation" : "Start Naviagtion", for: .normal)
     }
 
     override func viewDidLoad() {
@@ -136,10 +169,60 @@ class ViewController: UIViewController {
     }
     
     fileprivate func mapRoute(destinationCoordinate: CLLocationCoordinate2D) {
+        // check current locsation of our user
+        guard let sourceCoodinate = locationManager.location?.coordinate else { return }
         
+        let sourcePlacemark = MKPlacemark(coordinate: sourceCoodinate)
+        let destinationPlacemark = MKPlacemark(coordinate: destinationCoordinate)
+        
+        let sourceItem = MKMapItem(placemark: sourcePlacemark)
+        let destinationItem = MKMapItem(placemark: destinationPlacemark)
+        
+        let routeRequest = MKDirections.Request()
+        routeRequest.source = sourceItem
+        routeRequest.destination = destinationItem
+        routeRequest.transportType = .automobile
+        
+        let directions = MKDirections(request: routeRequest)
+        directions.calculate { response, error in
+            if let error = error {
+                print(error.localizedDescription)
+                return
+            }
+            guard let response = response, let route = response.routes.first else { return }
+            
+            self.route = route
+            self.mapView.addOverlay(route.polyline)
+            self.mapView.setVisibleMapRect(route.polyline.boundingMapRect,
+                                           edgePadding: UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16),
+                                           animated: true)
+            
+            self.getRouteSteps(route: route)
+        }
     }
     
     fileprivate func getRouteSteps(route: MKRoute) {
+        for monitoredRegion in locationManager.monitoredRegions {
+            locationManager.stopMonitoring(for: monitoredRegion)
+        }
+        
+        let steps = route.steps
+        self.steps = steps
+        
+        for i in 0..<steps.count {
+            let step = steps[i]
+            print(step.instructions)
+            print(step.distance)
+            
+            let region = CLCircularRegion(center: step.polyline.coordinate, radius: 20, identifier: "\(i)")
+            locationManager.stopMonitoring(for: region)
+        }
+        
+        stepCounter += 1
+        let initialMessage = "In \(steps[stepCounter].distance) meters \(steps[stepCounter].instructions), then in \(steps[stepCounter + 1].distance) meters, \(steps[stepCounter + 1].instructions)"
+        directionLabel.text = initialMessage
+        let speechUtterance = AVSpeechUtterance(string: initialMessage)
+        speechSynthesizer.speak(speechUtterance)
         
     }
 
@@ -160,9 +243,32 @@ extension ViewController: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         handleAuthorizationStatus(locationManager: locationManager, status: status)
     }
+    
+    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+        stepCounter += 1
+        if stepCounter < steps.count {
+          let message = "In \(steps[stepCounter].distance) meters \(steps[stepCounter].instructions), then in \(steps[stepCounter + 1].distance) meters, \(steps[stepCounter + 1].instructions)"
+            directionLabel.text = message
+            let speechUtterance = AVSpeechUtterance(string: message)
+            speechSynthesizer.speak(speechUtterance)
+        } else { 
+            let message = "You have arrived at yout destination"
+            directionLabel.text = message
+            stepCounter = 0
+            navigationStarted = false
+            for monitoredRegion in locationManager.monitoredRegions {
+                locationManager.stopMonitoring(for: monitoredRegion)
+            }
+        }
+    }
 }
 
 
 extension ViewController: MKMapViewDelegate {
 
+    func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+        let renderer = MKPolylineRenderer(overlay: overlay)
+        renderer.strokeColor = .systemBlue
+        return renderer
+    }
 }
